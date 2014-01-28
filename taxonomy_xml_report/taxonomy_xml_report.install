@@ -1,0 +1,8 @@
+<?php
+/*
+ * Set to run after taxonomy_xml_fields
+ */
+function taxonomy_xml_report_install(){
+  db_query("UPDATE {system} SET weight = 10 WHERE name = 'taxonomy_xml_report'");
+}
+?>

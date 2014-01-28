@@ -1,0 +1,431 @@
+<?php
+
+define('TAXONOMY_XML_REPORT','taxonomy_xml_report');
+define('TAXONOMY_XML_REPORT_NODE_TYPE','taxonomy_update_report');
+
+/**
+ * Implements hook_menu()
+ */
+function taxonomy_xml_report_menu(){
+  //master reports
+  $items['taxonomy/%taxonomy_vocabulary/reports'] = array(
+    'type' => MENU_CALLBACK,
+    'access callback' => 'taxonomy_xml_report_page_access',
+    'access arguments' => array(1),
+    'title callback' => 'taxonomy_xml_report_page_title',
+    'title arguments' => array(1),
+    'page callback' => 'taxonomy_xml_report_page',
+    'page arguments' => array(1),
+  );
+  //local reports
+  $items['vocabulary/%taxonomy_vocabulary_machine_name/reports'] = array(
+    'type' => MENU_LOCAL_TASK,
+    'access callback' => 'taxonomy_xml_report_page_local_access',
+    'access arguments' => array(1),
+    'title' => 'Reports',
+    'page callback' => 'taxonomy_xml_reports_page',
+    'page arguments' => array(1),
+    'weight' => 100,
+  );
+  $items['vocabulary/%taxonomy_vocabulary_machine_name/reports/%node'] = array(
+    'type' => MENU_LOCAL_TASK,
+    'access callback' => 'taxonomy_xml_report_page_local_access',
+    'access arguments' => array(1,3),
+    'title callback' => 'taxonomy_xml_report_title',
+    'title arguments' => array(3),
+    'page callback' => 'taxonomy_xml_report_page',
+    'page arguments' => array(1,3),
+    'weight' => 100,
+  );
+
+  return $items;
+}
+
+function taxonomy_xml_report_access($vocab, $report){
+  return taxonomy_xml_report_page_local_access($vocab) && node_access('$view',$report);
+}
+
+function taxonomy_xml_report_title($report){
+  $title = 'Report: '.$report->title;
+  return $title;
+}
+
+function taxonomy_xml_report_page($vocab, $report){
+  drupal_set_title(taxonomy_xml_report_title($report));
+  return drupal_render(node_view($report));
+}
+
+function taxonomy_xml_report_page_title($taxonomy_vocabulary){
+  return $taxonomy_vocabulary->name . ': Update Reports';
+}
+
+function taxonomy_xml_report_page_access($taxonomy_vocabulary){
+  return taxonomy_xml_lookup_is_master_vocabulary($taxonomy_vocabulary);
+}
+
+function taxonomy_xml_report_page_local_access($taxonomy_vocabulary){
+  return TRUE; //taxonomy_xml_lookup_is_local_vocabulary($taxonomy_vocabulary);
+}
+
+function taxonomy_xml_report_get_reports($masters){
+  
+  if( empty($masters) ){
+    return FALSE;
+  }
+
+  $query = db_select('node','report');
+  $query->join('field_data_field_source_uri', 'source', 'source.entity_id = report.nid');
+  $query->fields('report', array('nid'))
+    ->condition('source.deleted',0)
+    ->condition('source.entity_type','node')
+    ->condition('report.status',1);
+  $or = db_or();
+  if( !is_array($masters) ){
+    $masters = array(0 => $masters);
+  }
+  foreach($masters as $taxonomy_vocabulary){  
+    $or->condition('source.field_source_uri_value',$taxonomy_vocabulary->field_source_uri[LANGUAGE_NONE][0]['value']);
+  }
+  $query->condition($or);
+  $result = $query->execute()->fetchAssoc();
+  return !empty($result) ? array_values($result) : FALSE;
+}
+
+function taxonomy_xml_reports_page($taxonomy_vocabulary){
+
+  drupal_set_title($taxonomy_vocabulary->name.': Reports');
+  $is_master = taxonomy_xml_lookup_is_master_vocabulary($taxonomy_vocabulary);
+  $nids = array();
+  if( $is_master ){
+    $nids = taxonomy_xml_report_get_reports($taxonomy_vocabulary);
+  } else {
+    $masters = taxonomy_xml_lookup_get_master_vocabularies($taxonomy_vocabulary);
+    $nids = taxonomy_xml_report_get_reports(taxonomy_vocabulary_load_multiple($masters));
+  }
+  
+  if( empty($nids) ){
+    return 'No reports found.';
+  }
+  
+  $header = array(
+      array(
+        'data' => t('Report'),
+        'nowrap' => 'nowrap',
+      ),
+  );
+  
+  $reports = node_load_multiple($nids);
+  $rows = array();
+  foreach($reports as $report){
+    $link = 'vocabulary/'.$taxonomy_vocabulary->machine_name.'/reports/'.$report->nid; //'node/'.$report->nid
+    $rows[] = array(
+  	  'data' => array(
+         array('data' => l( $report->title, $link),'nowrap' => 'nowrap', 'valign' => 'top'),  
+      ),
+    );
+  }
+  
+  return theme('table', array(
+    'header' => $header,
+    'rows' => $rows,
+    'sticky' => TRUE,
+    )
+  );
+}
+
+
+
+function taxonomy_xml_report_node_view_alter(&$build) {
+  $build['#post_render'][] = 'taxonomy_xml_report_node_post_render';
+}
+
+function taxonomy_xml_report_node_post_render($markup, $element) {
+  global $user;
+      
+  if( $user->uid && $element['#bundle'] == TAXONOMY_XML_REPORT_NODE_TYPE){
+    $output = $markup;
+    $report = $element['#node'];
+    $new_terms = _taxonomy_xml_report_get_new_terms_from_report($report);
+    
+    $master = _taxonomy_xml_lookup_get_vocabulary_for_report($report);    
+    $manager_uids = taxonomy_xml_lookup_get_local_managers_for_master_vocabulary($master);  
+  
+    $locals = array();
+	  foreach($manager_uids as $uid => $mgmt){
+	    if( !in_array($mgmt->vid, $locals) && ($uid == $user->uid || $user->uid == 1) ){
+	      $locals[] = $mgmt->vid;
+	    }
+	  }
+    if( !empty($locals)){
+      $output .= '<hr />';
+      
+      //get local unmapped terms & local terms mapped to report new term parents
+      $parents = taxonomy_xml_lookup_get_term_parents($new_terms);
+      
+      $header = array(
+         array(
+           'data' => t('Vocabulary'),
+           'nowrap' => 'nowrap',
+          ),
+      	  array(
+            'data' => t('Status'),
+        	'nowrap' => 'nowrap',
+      	  ),
+      	  array(
+            'data' => t('Map It'),
+        	'nowrap' => 'nowrap',
+      	  ),
+  		);
+  		
+      foreach($locals as $local){
+        $local = taxonomy_vocabulary_load($local);
+        $unmapped = taxonomy_xml_lookup_unmapped($local);
+  		
+  		  $map_form = '<option value="_none"> - None - </option>';
+  		  $new_terms = taxonomy_term_load_multiple($new_terms);
+  		  foreach($new_terms as $term){
+  		    $map_form .= '<option value="'.$term->tid.'">'.$term->name.'</option>';
+  		  }
+  		  $map_form .= '</select>';
+  		
+        $rows = array();
+        foreach($unmapped as $unassigned){
+          $form = '<select name="'.$unassigned->tid.'">'.$map_form;
+          $rows[] = array(
+  	  		'data' => array(
+         	  array('data' => l($unassigned->name, 'taxonomy/term/'.$unassigned->tid, array('target' => '_blank')),'nowrap' => 'nowrap', 'valign' => 'top'),
+         	  array('data' => 'not mapped','nowrap' => 'nowrap', 'valign' => 'top'), 
+         	  array('data' => $form,'nowrap' => 'nowrap', 'valign' => 'top'), 
+       		),
+          );
+        }
+        
+        $header[0]['data'] = $local->name;
+        $output .= '<form>';
+      	$output .= theme('table', array(
+       	  'header' => $header,
+          'rows' => $rows,
+          'sticky' => TRUE,
+          'empty' => t('No results'),
+          )
+        ); 
+        $output .= '<input type="submit" name="submit" value="Map Terms"/></form>';
+      }            
+    }  
+    
+    return $output;
+  }
+  
+  return $markup;
+}
+
+function taxonomy_xml_report_view($report){
+  $header = array(
+      array(
+        'data' => t('Report'),
+        'nowrap' => 'nowrap',
+      ),
+  );
+  
+  $reports = node_load_multiple($nids);
+  $rows = array();
+  foreach($reports as $report){
+    $rows[] = array(
+  	  'data' => array(
+         array('data' => l( $report->title, 'node/'.$report->nid),'nowrap' => 'nowrap', 'valign' => 'top'),  
+      ),
+    );
+  }
+  
+  return theme('table', array(
+    'header' => $header,
+    'rows' => $rows,
+    'sticky' => TRUE,
+    )
+  );
+}
+
+
+/*
+ * Implements hook_batch_alter(&$batch).
+ * 
+ * If the bath process is for 'taxonomy_xml' & its type is 'rdf',
+ * then modify the batch process to work for this module.
+ * 
+ * Setup the $_SESSION variable and alter the batch's 'finished' routine
+ * 
+ * @param &$batch
+ *   The batch process to alter
+ */
+function taxonomy_xml_report_batch_alter(&$batch) {
+
+  if ($batch['sets']['0']['operations']['0']['0'] == 'taxonomy_xml_cached_get_contents') {
+  
+    $type = $batch['sets']['0']['operations']['0']['1']['1']['format'];
+
+    if ($type == 'rdf') {
+      
+      $vocabulary_url = $batch['sets']['0']['operations']['0']['1']['0'];
+      $vid = $batch['sets']['0']['operations']['0']['1']['1']['vid'];
+      
+      if( $vid != -1 ){
+      
+        $vocab = taxonomy_vocabulary_load($vid);
+        if( $vocab->field_vocab_type[LANGUAGE_NONE][0]['value'] == TXL_MASTER_VOCAB_VALUE ){
+        
+          $report = new stdClass();
+  	      $report->type = 'taxonomy_update_report';
+  	      $report->title = _taxonomy_xml_report_title($vocab);
+  	      $report->module = 'node';
+  	      $report->language = LANGUAGE_NONE;
+  	      $report->field_date2[LANGUAGE_NONE][0] = array(
+      		'value' => date('Y-m-d H:i:s', strtotime('now')),
+      		'timezone' => 'UTC',
+      		'timezone_db' => 'UTC',
+  		  );
+  	      $report->field_source_uri[LANGUAGE_NONE][0]['value'] = $vocabulary_url;
+  	      
+          node_object_prepare($report);
+      	
+      	  $_SESSION[TAXONOMY_XML_REPORT] = array(
+            'report' => $report,
+      	  );
+
+      	  //set the batch's finished routine to a routine we control
+      	  $batch['sets']['0']['finished'] = 'taxonomy_xml_report_batch_import_finished';
+      	}
+      }
+    }
+  }
+}
+
+function _taxonomy_xml_report_title($vocabulary){
+  return '['.date("D M d, Y G:i").'] Update to '. $vocabulary->name;
+}
+
+/**
+ * Show the user which fields could be created on the taxonomy vocabulary based on the RDF
+ *
+ * @ingroup batch_operations
+ * 
+ * @see taxonomy_xml_fields_batch_alter(&$batch)
+ */
+function taxonomy_xml_report_batch_import_finished($success, $results, $operations) {
+
+  $report = $_SESSION[TAXONOMY_XML_REPORT]['report'];
+  $vid = $_SESSION[TAXONOMY_XML_FIELDS_VAR]['vid'];
+  $terms = isset($_SESSION[TAXONOMY_XML_REPORT]['terms']) ? $_SESSION[TAXONOMY_XML_REPORT]['terms'] : FALSE;
+  $nofity = FALSE;
+
+  if ($terms && isset($terms['new']) ) {
+    foreach ($terms['new'] as $delta => $tid) {
+      $report->field_new_terms[LANGUAGE_NONE][$delta]['target_id'] = $tid;
+      $notify = TRUE;
+    }
+  }
+  
+  //save report
+  $perm = TXL_UPDATE_MASTER_VOCAB_PERMISSION;
+  $report->uid = _taxonomy_xml_report_get_updater();
+  
+    
+  
+  node_save($report);
+  taxonomy_xml_report_notify($report, $vid);
+
+  unset($_SESSION[TAXONOMY_XML_REPORT]);
+  
+  if( $notify ){
+    taxonomy_xml_report_notify($report, $vid);
+  }
+  
+  taxonomy_xml_fields_batch_import_finished($success, $results, $operations);
+}
+
+
+/*
+ * notify vocabulary managers
+ */
+function taxonomy_xml_report_notify($report, $vid){
+
+  if( !empty($report->field_new_terms) && !empty($report->field_new_terms[LANGUAGE_NONE]) ){
+    $locals = taxonomy_xml_lookup_get_vocabularies(TXL_LOCAL_VOCAB_VALUE, $vid);
+    if( !empty($locals) ){
+      
+    }
+  } 
+}
+
+/*
+ * Implements hook_email()
+ */
+function taxonomy_xml_report_email($params){
+  $site_email = variable_get('site_mail',FALSE);
+  
+}
+
+/*
+ * Implements hook_taxonomy_term_insert($term). 
+ * 
+ * Remember all new terms
+ *
+ */
+function taxonomy_xml_report_taxonomy_term_insert($term) {
+  
+  if( isset($_SESSION[TAXONOMY_XML_FIELDS_VAR]) && isset($_SESSION[TAXONOMY_XML_REPORT]) ){
+    $_SESSION[TAXONOMY_XML_REPORT]['terms']['new'][] = $term->tid;
+  }
+}
+
+/*
+ * Implements hook_taxonomy_term_insert($term). 
+ * 
+ * Remember all updated terms
+ *
+ */
+function taxonomy_xml_report_taxonomy_term_update($term) {
+  
+  if( isset($_SESSION[TAXONOMY_XML_FIELDS_VAR]) && isset($_SESSION[TAXONOMY_XML_REPORT]) ){
+    $_SESSION[TAXONOMY_XML_REPORT]['terms']['updated'][] = $term->tid;
+  }
+}
+
+function _taxonomy_xml_report_get_updater(){
+  $result = taxonomy_xml_lookup_get_master_vocabulary_updaters();
+  foreach($result as $updater){
+    return $updater->uid;
+  }
+}
+
+function _taxonomy_xml_lookup_get_reports_for_vocabulary($taxonomy_vocabulary){
+  $query = new EntityFieldQuery;
+  $query->entityCondition('entity_type','node')
+        ->fieldCondition('field_source_uri','value', $taxonomy_vocabulary->field_source_uri[LANGUAGE_NONE][0]['value']);
+  $result = $query->execute();
+  return array_keys($result['node']);
+}
+
+function _taxonomy_xml_lookup_get_vocabulary_for_report($report){
+  $query = new EntityFieldQuery;
+  $query->entityCondition('entity_type','taxonomy_vocabulary')
+        ->fieldCondition('field_source_uri','value', $report->field_source_uri[LANGUAGE_NONE][0]['value']);
+  $result = $query->execute();
+  $vids = array_keys($result['taxonomy_vocabulary']);
+  if( !empty($vids) ){
+    return taxonomy_vocabulary_load(array_shift($vids));
+  }
+  
+  return FALSE;
+}
+
+function _taxonomy_xml_report_get_new_terms_from_report($report){
+  $terms = $report->field_new_terms[LANGUAGE_NONE];
+  if( empty($terms) ){
+    return FALSE;
+  }
+  foreach($terms as $index => $term){
+    $terms[$index] = $term['tid'];
+  }
+  return $terms;
+}
+?>

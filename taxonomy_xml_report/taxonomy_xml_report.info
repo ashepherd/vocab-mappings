@@ -1,0 +1,9 @@
+name = Taxonomy XML Update Reporter
+description = Create a report when taxonomy_xml updates a vocabulary
+
+dependencies[] = taxonomy_xml
+dependencies[] = taxonomy_xml_fields
+dependencies[] = taxonomy_xml_lookup
+
+package = "Taxonomy"
+core=7.x

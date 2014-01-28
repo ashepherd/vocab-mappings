@@ -1,0 +1,167 @@
+<?php 
+
+function taxonomy_sparql_test(){
+  $query = 'SELECT DISTINCT ?p ?v ?r
+    WHERE {  
+      { <http://vocab-mappings.whoi.edu/taxonomy_term/9> ?p ?v } 
+      UNION 
+      { ?r ?p <http://vocab-mappings.whoi.edu/taxonomy_term/9> }
+    }';
+  
+  drupal_goto('sparql?query='.$query.'&output=htmltab&jsonp=&key=&show_inline=1');
+}
+
+function taxonomy_sparql_menu(){
+  $items['vocabulary/%taxonomy_vocabulary_machine_name/sparql'] = array(
+    'type' => MENU_LOCAL_TASK,
+    'access callback' => 'taxonomy_sparql_page_access',
+    'access arguments' => array(1),
+    'title' => 'SPARQL Browser',
+    'page callback' => 'taxonomy_sparql_page',
+    'page arguments' => array(1),
+  );
+  return $items;
+}
+
+function taxonomy_sparql_page_access($vocab, $perm = 'access content'){
+  return taxonomy_xml_lookup_is_master_vocabulary($vocab) && user_access($perm);
+}
+
+function taxaonomy_sparql_get_endpoint($vocabulary){
+  //get the endpoint for the vocabulary
+  return FALSE;
+}
+
+function taxonomy_sparql_page($vocabulary, $uri = 'begin', $referer = FALSE){
+  if( $uri == 'begin' ){
+    $uri = $vocabulary->field_source_uri[LANGUAGE_NONE][0]['value'];
+  } else {
+    $uri = taxonomy_sparql_resource_load($uri);
+  }
+  if( $referer ){
+    $referer = taxonomy_sparql_resource_load($referer);
+  }
+  drupal_set_title('SPARQL Browse: '.$uri);
+  //$endpoint = taxaonomy_sparql_get_endpoint($vocabulary);
+  $endpoint = 'http://vocab.nerc.ac.uk/sparql/sparql';
+  $results = taxonomy_sparql_query($uri, $endpoint);
+  return taxonomy_sparql_table($results, $vocabulary, $uri, $referer);
+}
+
+function taxonomy_sparql_page_title($uri){
+  //return $uri;
+  return  'SPARQL Browser';
+}
+
+function taxonomy_sparql_resource_load($hex = FALSE){
+  if( isset($hex) && _taxonomy_xml_lookup_is_hex($hex) ){
+    return _taxonomy_xml_lookup_hex_decode($hex);
+  }
+  
+  return $hex;
+}
+
+function taxonomy_sparql_query($uri, $endpoint_uri){
+  $query = 'SELECT ?property ?value ?ref
+    WHERE {
+      { <'.$uri.'> ?property ?value }
+      UNION 
+      { ?ref ?property <'.$uri.'> }
+    }';
+  $endpoint = sparql_registry_load_by_uri($endpoint_uri);
+  $sparql = sparql_request($query,$endpoint);
+  if( !empty($sparql['result']['rows']) ){
+    return $sparql['result'];
+  }
+  
+  return FALSE;
+}
+
+function taxonomy_sparql_table($results, $vocabulary, $uri, $referer = NULL){
+
+  $variables = $results['variables'];
+  $prefixes = array_flip(rdf_get_namespaces());
+  
+  $header = array(
+    array(
+      'data' => t('Property'),
+      'nowrap' => 'nowrap',
+    ),
+    array(
+      'data' => t('Value'),
+      'nowrap' => 'nowrap',
+    ),
+  );
+  
+  $rows = array();
+  foreach($results['rows'] as $result){
+  
+    
+    $key = 'value';
+    if( array_key_exists('ref', $result) ){
+      $key = 'ref';
+    }
+    $name = _taxonomy_sparql_get_prefix($result['property'], $prefixes);
+      
+    $value = $result[$key];    
+    if( $result[$key.' type'] == 'uri' ){
+      $value = l( $value, 'vocabulary/'.$vocabulary->machine_name.'/sparql/'.bin2hex($value).'/'.bin2hex($uri));
+    }
+    
+    $rows[] = array(
+      'data' => array(
+        array('data' => $name, 'nowrap' => 'nowrap', 'valign' => 'top'),
+        array('data' => $value, 'valign' => 'top'),  
+      ),
+    );
+    
+    if( $uri == $referer ){
+      end($rows);
+      $rows[key($rows)]['data'][0]['style'] = 'font-weight:bold';
+      $rows[key($rows)]['data'][1]['style'] = 'font-weight:bold';
+    }  
+  }
+  
+  
+  $output = theme('table', 
+    array(
+      'header' => $header,
+      'rows' => $rows,
+      'sticky' => TRUE,
+      'empty' => t('No results'),
+    )
+  ); 
+  
+  return $output;
+}
+
+function _taxonomy_sparql_mapped_terms_query(){
+  return $query = 'PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+
+SELECT DISTINCT ?uri ?localName  ?communityName ?communityURI
+WHERE {
+    ?uri skos:prefLabel ?localName .
+    ?uri rdf:type ?mapping
+    FILTER(?mapping != ?uri)
+
+    ?mapping skos:prefLabel ?communityName .
+    ?mapping owl:sameAs ?communityURI
+    FILTER (?communityURI != ?uri)
+} ORDER BY ?localName ';
+}
+
+function _taxonomy_sparql_get_prefix($uri, $ns){
+  foreach($ns as $n => $prefix){
+    if( _taxonomy_sparql_startsWith($uri, $n) ){
+      $suffix = substr($uri, strlen($n));
+      return $prefix.':'.$suffix;
+    }
+  }
+  return $uri;
+}
+
+function _taxonomy_sparql_startsWith($whole, $chunk){
+  return !strncmp($whole, $chunk, strlen($chunk));
+}
+
+?>

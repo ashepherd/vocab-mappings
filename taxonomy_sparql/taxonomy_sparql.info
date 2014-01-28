@@ -1,0 +1,6 @@
+name = Taxonomy SPARQL
+description = Query a SPARQL endpoint for a taxonomy term's URI at a SPARQL endpoint
+dependencies[] = sparql
+dependencies[] = taxonomy_xml_lookup
+package = "Taxonomy"
+core=7.x

@@ -1,0 +1,1210 @@
+<?php
+
+DEFINE('SEAVOX_INSTRUMENT_LOOKUP_VIEW','seavox_instrument_lookup');
+DEFINE('SEAVOX_INSTRUMENT_LOOKUP_VIEW_PAGE_DISPLAY','page');
+
+DEFINE('TXL_VOCABULARY_TYPE_FIELD','field_vocab_type');
+DEFINE('TXL_VOCABULARY_MASTER_FIELD','field_master_vocabulary');
+DEFINE('TXL_VOCABULARY_MGR_FIELD','field_vocabulary_manager');
+DEFINE('TXL_VOCABULARY_MAPPING_FIELD','field_mapping');
+DEFINE('TXL_MASTER_VOCAB_VALUE',2);
+DEFINE('TXL_LOCAL_VOCAB_VALUE',1);
+DEFINE('TXL_NO_VOCAB_VALUE', 3);
+
+DEFINE('TXL_UPDATE_MASTER_VOCAB_PERMISSION','update master vocabularies');
+
+
+/*
+ * Implements hook_permission()
+ */
+function taxonomy_xml_lookup_permission(){
+  return array(
+    TXL_UPDATE_MASTER_VOCAB_PERMISSION => array(
+      'title' => t('Update Community Vocabularies'), 
+      'description' => t('Can update Master Vocabularies'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu()
+ */
+function taxonomy_xml_lookup_menu(){
+  $items['term_lookup/%taxonomy_term'] = array(
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('access content'),
+    'title callback' => 'taxonomy_xml_lookup_term_title',
+    'title arguments' => array(1),
+    'page callback' => 'taxonomy_xml_lookup_term',
+    'page arguments' => array(1),
+  );
+  $items['uri_lookup/%taxonomy_xml_lookup_guid'] = array(
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('access content'),
+    'title callback' => 'taxonomy_xml_lookup_term_title',
+    'title arguments' => array(1),
+    'page callback' => 'taxonomy_xml_lookup_term',
+    'page arguments' => array(1),
+  );
+  $items['guid_lookup'] = array(
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('access content'),
+    'title' => 'GUID Lookup',
+    'page callback' => 'taxonomy_xml_lookup_guid_uri',
+  );
+  $items['vocabularies'] = array(
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('access content'),
+    'title' => 'Vocabularies',
+    'page callback' => 'taxonomy_xml_lookup_vocabs',
+  );
+  $items['vocabularies/%'] = array(
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('access content'),
+    'title callback' => 'taxonomy_xml_lookup_vocabs_title',
+    'title arguments' => array(1),
+    'page callback' => 'taxonomy_xml_lookup_vocabs',
+    'page arguments' => array(1),
+  );
+  $items['vocabulary/%taxonomy_vocabulary_machine_name'] = array(
+    'access arguments' => array('access content'),
+    'title' => 'View',
+    'page callback' => 'taxonomy_xml_lookup_vocabs_view',
+    'page arguments' => array(1),
+    'weight' => -100,
+  );
+  //*
+  $items['vocabulary/%taxonomy_vocabulary_machine_name/view'] = array(
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'access arguments' => array('access content'),
+    'title' => 'View',
+    'page callback' => 'taxonomy_xml_lookup_vocabs_view',
+    'page arguments' => array(1),
+    'weight' => -100,
+  );
+  $items['vocabulary/%taxonomy_vocabulary_machine_name/edit'] = array(
+    'type' => MENU_LOCAL_TASK,
+    'access arguments' => array(TXL_UPDATE_MASTER_VOCAB_PERMISSION),
+    'title' => 'Edit',
+    'page callback' => 'taxonomy_xml_lookup_vocabs_edit',
+    'page arguments' => array( 1),
+    'weight' => -10,
+  );
+
+  $items['vocabulary/%taxonomy_vocabulary_machine_name/associated'] = array(
+    'type' => MENU_LOCAL_TASK,
+    'access callback' => 'taxonomy_xml_show_local_tab',
+    'access arguments' => array(1),
+    'title' => 'Associated Vocabularies',
+    'page callback' => 'taxonomy_xml_lookup_local_masters_page',
+    'page arguments' => array(1,TRUE),
+    'weight' => 50,
+  );
+  //*/
+  $items['vocabulary/%taxonomy_vocabulary_machine_name/mapped'] = array(
+    'type' => MENU_LOCAL_TASK,
+    'access callback' => 'taxonomy_xml_show_local_tab',
+    'access arguments' => array(1),
+    'title' => 'Mapped Terms',
+    //'title callback' => 'taxonomy_xml_lookup_parents_for_unmapped_title',
+    //'title arguments' => array(1,TRUE),
+    'page callback' => 'taxonomy_xml_lookup_unmapped_page',
+    'page arguments' => array(1,TRUE),
+  );
+  $items['vocabulary/%taxonomy_vocabulary_machine_name/unmapped'] = array(
+    'type' => MENU_LOCAL_TASK,
+    'access callback' => 'taxonomy_xml_show_local_tab',
+    'access arguments' => array(1),
+    'title' => 'Unmapped Terms',
+    //'title callback' => 'taxonomy_xml_lookup_parents_for_unmapped_title',
+    //'title arguments' => array(1),
+    'page callback' => 'taxonomy_xml_lookup_unmapped_page',
+    'page arguments' => array(1),
+  );
+  $items['taxonomy/term/%taxonomy_term/community'] = array(
+    'type' => MENU_LOCAL_TASK,
+    'access callback' => 'taxonomy_xml_show_can_map_term',
+    'access arguments' => array(2),
+    'title' => 'Map To Community Term',
+    'page callback' => 'taxonomy_xml_lookup_search',
+    'page arguments' => array(2),
+    'weight' => 11,
+  );
+  /*
+  $items['taxonomy/term/%taxonomy_term/parents'] = array(
+    'type' => MENU_LOCAL_TASK,
+    'access arguments' => array('access content'),
+    'title callback' => 'taxonomy_xml_lookup_parents_for_term_title',
+    'title arguments' => array(2),
+    'title' => 'Parents',
+    'weight' => 3,
+    'page callback' => 'taxonomy_xml_lookup_parents_for_term',
+    'page arguments' => array(2),
+  );
+  */
+  return $items;
+}
+
+function taxonomy_xml_lookup_menu_alter(&$menu){
+  //dpm($menu);
+  $menu['taxonomy/term/%taxonomy_term/display']['type'] = MENU_CALLBACK;
+}
+
+function taxonomy_xml_lookup_form_alter(&$form, &$form_state, $form_id){
+  //dpm($form,$form_id);
+}
+
+function taxonomy_xml_show_can_map_term($term, $perm = 'access content'){
+  $vocab = taxonomy_vocabulary_load($term->vid);
+  if( taxonomy_xml_lookup_is_master_vocabulary($vocab) || !user_access($perm) ){
+    return FALSE;
+  }
+  return TRUE;
+}
+
+function taxonomy_xml_lookup_search($term){
+  drupal_set_title('Community Mappings for '.$term->name);
+  $html = drupal_render(taxonomy_term_view($term)) . '<hr/>';
+  $html .= views_embed_view('term_search','page');
+  return $html;
+}
+
+function taxonomy_xml_show_local_tab($vocab, $perm = 'access content'){
+  return !taxonomy_xml_lookup_is_master_vocabulary($vocab) && user_access($perm);
+}
+
+function taxonomy_xml_lookup_local_masters_page($vocab){
+  drupal_set_title($vocab->name.': Community Vocabularies');
+  $header = array(
+      array(
+        'data' => t('Vocabulary'),
+        'nowrap' => 'nowrap',
+      ),
+      array(
+        'data' => t('Source'),
+        'nowrap' => 'nowrap',
+      ),
+      array(
+        'data' => t('Operations'),
+        'nowrap' => 'nowrap',
+      ),
+  );
+  
+  $masters = taxonomy_xml_lookup_get_master_vocabularies($vocab);
+  if( !empty($masters) ){
+    $masters = taxonomy_vocabulary_load_multiple($masters);
+    $rows = array();
+    foreach($masters as $master){
+      $source = isset($master->field_source_uri[LANGUAGE_NONE][0]['value']) ? $master->field_source_uri[LANGUAGE_NONE][0]['value'] : ''; 
+      $rows[] = array(
+  	    'data' => array(
+           array('data' => l($master->name, 'admin/structure/taxonomy/'.$master->machine_name),'nowrap' => 'nowrap', 'valign' => 'top'),
+           array('data' => l($source, $source, array('attributes' => array('target' => '_blank'))),'nowrap' => 'nowrap', 'valign' => 'top'),
+           array('data' => l( 'edit', 'admin/structure/taxonomy/'.$master->machine_name.'/edit'),'nowrap' => 'nowrap', 'valign' => 'top'), 
+         ),
+      );
+    }  
+  }
+  
+  return theme('table', array(
+    'header' => $header,
+    'rows' => $rows,
+    'sticky' => TRUE,
+    'empty' => t('No results'),
+    )
+  );
+
+}
+
+
+function taxonomy_xml_lookup_form_taxonomy_form_term_alter(&$form, &$form_state, $form_id){
+  $form['field_mapping'][LANGUAGE_NONE]['#size'] = 20;
+  $form['field_mapping']['#access'] = FALSE;
+  $last = $form['field_mapping_uri'][LANGUAGE_NONE]['#max_delta'];
+  for($i = 0; $i <= $last; $i++){
+    if( isset($form['field_mapping_uri'][LANGUAGE_NONE][$i]) ){
+      $form['field_mapping_uri'][LANGUAGE_NONE][$i]['mapit'] = array(
+        '#type' => 'submit',
+        '#name' => 'field_mapping_uri_map_it',
+        '#value' => 'Map It',
+        '#submit' => array('taxonomy_xml_lookup_map_it_button'),
+        //'#ajax' => array('callback' => map_it', 'wrapper' => 'map-it','effect' => 'fade'),
+      );
+    }
+  }
+}
+
+function taxonomy_xml_lookup_map_it_button($form, $form_state){
+
+}
+
+function taxonomy_xml_lookup_vocabs_view($vocab){
+  $is_master = taxonomy_xml_lookup_is_master_vocabulary($vocab);
+  $display = $is_master ? 'community' : 'project';
+  drupal_set_title($vocab->name);
+  $count = count(taxonomy_get_tree($vocab->vid));
+  $mapped_count = taxonomy_xml_lookup_count_terms($vocab, TRUE); 
+  $html = '<p>'.
+    'Total: '.$count.'</br>';
+  if(!$is_master){
+    $html .= 'Mapped: '.$mapped_count.'</p>';
+  }
+  $html .= views_embed_view('vocabulary',$display, $vocab->machine_name);
+  return $html;
+}
+
+function taxonomy_xml_lookup_vocabs_edit($vocabulary){
+  drupal_set_title('Edit '.$vocabulary->name);
+  
+  $form_state = array();
+  $form_state['build_info']['args'] = func_get_args();
+    
+  module_load_include('inc', 'taxonomy', 'taxonomy.admin');
+
+  $form = drupal_build_form('taxonomy_form_vocabulary', $form_state);  
+  $form['#submit'][0] = 'taxonomy_xml_lookup_vocab_redirect';
+  $form_state['redirect'] = 'vocabulary/'.$vocabulary->machine_name;
+  
+  //dpm($form);
+  //dpm($form_state);
+  return $form;
+}
+function taxonomy_xml_lookup_vocab_redirect($form, &$form_state){
+  $vocabulary = $form_state['vocabulary'];
+  entity_form_submit_build_entity('taxonomy_vocabulary', $vocabulary, $form, $form_state);
+
+  switch (taxonomy_vocabulary_save($vocabulary)) {
+    case SAVED_NEW:
+      drupal_set_message(t('Created new vocabulary %name.', array('%name' => $vocabulary->name)));
+      watchdog('taxonomy', 'Created new vocabulary %name.', array('%name' => $vocabulary->name), WATCHDOG_NOTICE, l(t('edit'), 'admin/structure/taxonomy/' . $vocabulary->machine_name . '/edit'));
+      break;
+
+    case SAVED_UPDATED:
+      drupal_set_message(t('Farted vocabulary %name.', array('%name' => $vocabulary->name)));
+      watchdog('taxonomy', 'Updated vocabulary %name.', array('%name' => $vocabulary->name), WATCHDOG_NOTICE, l(t('edit'), 'admin/structure/taxonomy/' . $vocabulary->machine_name . '/edit'));
+      break;
+  }
+
+  $form_state['redirect'] = 'vocabulary/'.$vocabulary->machine_name;
+  //dpm($form_state);
+}
+
+function taxonomy_xml_lookup_parents_for_unmapped_title($taxonomy_vocabulary, $mapped = FALSE){
+  $title = $mapped ? 'Mapped' : 'Unmapped';
+  return $title.' terms of ' . $taxonomy_vocabulary->name;
+}
+
+function taxonomy_xml_lookup_mapped($taxonomy_vocabulary){
+  return taxonomy_xml_lookup_unmapped($taxonomy_vocabulary, TRUE);
+}
+
+function taxonomy_xml_lookup_count_terms($vocab, $mapped = TRUE){
+  $results = taxonomy_xml_lookup_unmapped($vocab, $mapped);
+  if( $results ){
+    return count($results);
+  }
+  
+  return -1;
+}
+
+function taxonomy_xml_lookup_unmapped($taxonomy_vocabulary, $exists = FALSE){  
+  if( is_object($taxonomy_vocabulary) ){
+    $taxonomy_vocabulary = $taxonomy_vocabulary->vid;
+  }
+  
+  $exists = $exists ? 'IN' : 'NOT IN';
+  
+  //get all terms where term not in field_mapping (enttity_id)
+  $query = db_select('taxonomy_term_data', 't')
+    ->fields('t', array('tid'))
+    ->condition('t.vid',$taxonomy_vocabulary);
+  $mapped_query = db_select('field_data_'.TXL_VOCABULARY_MAPPING_FIELD, 'map')
+    ->fields('map', array('entity_id'))
+    ->condition('map.deleted',0)
+    ->condition('map.entity_type','taxonomy_term');
+  $query->condition('t.tid', $mapped_query, $exists);
+  $result = $query->execute()->fetchAllAssoc('tid');
+  if( !empty($result) ){
+    return taxonomy_term_load_multiple(array_keys($result));
+  }
+  
+  return FALSE;
+}
+
+function taxonomy_xml_lookup_unmapped_page($taxonomy_vocabulary, $mapped = FALSE){  
+  
+  $title = $mapped ? 'Mapped' : 'Unmapped';
+  drupal_set_title($taxonomy_vocabulary->name.': '.$title . ' Terms');
+  $unmapped = taxonomy_xml_lookup_unmapped($taxonomy_vocabulary,$mapped);
+  
+  $header = array(
+    array(
+      'data' => t($title.' Term'),
+      'nowrap' => 'nowrap',
+    ),
+  );
+  if( $mapped ){
+    $header[] = array(
+      'data' => t('Mapping'),
+      'nowrap' => 'nowrap',
+    );
+  }  
+  
+  $rows = array();
+  foreach($unmapped as $index => $term){
+  	$rows[$index] = array(
+  	  'data' => array(
+         array('data' => '<strong>'.$term->name. '</strong> ('.l('view','taxonomy/term/'.$term->tid).' | '.l( 'edit', 'taxonomy/term/'.$term->tid.'/edit').')','nowrap' => 'nowrap', 'valign' => 'top'),
+       ),
+    );
+    if( $mapped ){
+      $mapping = '';
+      if( isset($term->field_mapping[LANGUAGE_NONE][0]['tid']) ){
+        $mapping = taxonomy_term_load($term->field_mapping[LANGUAGE_NONE][0]['tid']);
+        $mapping = l($mapping->name, 'taxonomy/term/'.$mapping->tid);
+      }
+      $rows[$index]['data'][] = array(
+        'data' => $mapping, 'valign' => 'top' 
+      );
+    }
+  }
+  
+  return theme('table', array(
+    'header' => $header,
+    'rows' => $rows,
+    'sticky' => TRUE,
+    'empty' => t('No results'),
+    )
+  );
+
+}
+
+function taxonomy_xml_lookup_parents_for_term_title($term){
+  return 'Broader terms of ' . $term->name;
+}
+
+function taxonomy_xml_lookup_parents_for_term($term){
+  $vars = array(
+    'items' => _taxonomy_xml_lookup_itemize_parents( taxonomy_xml_lookup_get_parents($term->tid) ),
+    'title' => NULL,
+    'type' => 'ul',
+    'attributes' => array(),
+  );
+  return theme_item_list($vars);
+}
+
+function taxonomy_xml_lookup_get_parents($tid, &$parents = array(), $ids_only = FALSE){
+
+  $tree = taxonomy_get_parents($tid);
+  foreach($tree as $pid => $parent){
+    if( $ids_only ){
+      if( !in_array($pid, $parents) ){
+        $parents[] = $pid;
+        taxonomy_xml_lookup_get_parents($pid, $parents, TRUE);
+      }
+    } else {
+      $parents[$pid] = array(
+        'parent' => $parent,
+        'parents' => taxonomy_xml_lookup_get_parents($pid),
+      );
+    }
+  }
+  return $parents;
+}
+
+function taxonomy_xml_lookup_get_term_parents($tids){
+  $all_parents = array();
+  foreach($tids as $tid){
+    taxonomy_xml_lookup_get_parents($tid, $all_parents, TRUE);
+  }
+  return $all_parents;
+}
+
+function taxonomy_xml_lookup_get_mappers($mapped_to_tids){
+  $query = new EntityFieldQuery;
+  $query->entityCondition('entity_type','taxonomy_term')
+        ->fieldCondition('field_mapping','target_id', $mapped_to_tids, 'IN');
+  $result = $query->execute();
+  return taxonomy_term_load_multiple(array_keys($result['taxonomy_term']));
+}
+
+function taxonomy_xml_lookup_is_master_vocabulary($taxonomy_vocabulary){
+  return isset($taxonomy_vocabulary->field_vocab_type[LANGUAGE_NONE][0]['value']) ? $taxonomy_vocabulary->field_vocab_type[LANGUAGE_NONE][0]['value'] == TXL_MASTER_VOCAB_VALUE : FALSE;
+}
+
+function taxonomy_xml_lookup_is_local_vocabulary($taxonomy_vocabulary){
+  return isset($taxonomy_vocabulary->field_vocab_type[LANGUAGE_NONE][0]['value']) ? $taxonomy_vocabulary->field_vocab_type[LANGUAGE_NONE][0]['value'] == TXL_LOCAL_VOCAB_VALUE : FALSE;
+}
+
+/**
+ * get the vids for all vocabularies given a type, or not.
+ */
+function taxonomy_xml_lookup_get_vocabs($type = NULL){
+  $query = new EntityFieldQuery;
+  $query->entityCondition('entity_type','taxonomy_vocabulary');
+  if( isset($type) ){
+    $query->fieldCondition(TXL_VOCABULARY_TYPE_FIELD, 'value', $type, '=');
+  }
+  $result = $query->execute();
+  return array_keys($result['taxonomy_vocabulary']);
+}
+
+
+function taxonomy_xml_lookup_vocabs_title($type = 'master'){
+  switch($type){
+    case 'local': return 'Project Vocabularies';
+    default: return 'Community Vocabularies';
+  }
+}
+
+/**
+ * Display a table of all the vocabularies
+ */
+function taxonomy_xml_lookup_vocabs($vocab_type = 'community'){
+  global $user;
+  
+
+  $vocab_type = $vocab_type == 'community' ? TXL_MASTER_VOCAB_VALUE : TXL_LOCAL_VOCAB_VALUE;
+
+  $title = 'Regular';
+  $opposite_title;
+  $action = 'unmapped';
+  switch($vocab_type){
+    case TXL_MASTER_VOCAB_VALUE:
+      $title = 'Community';
+      $opposite_title = 'Project';
+      $action = 'mapped';
+      break;
+    case TXL_LOCAL_VOCAB_VALUE:
+      $title = 'Project';
+      $opposite_title = 'Community';
+      $action = 'unmapped';
+      break;
+  }
+  
+  drupal_set_title($title.' Vocabularies');
+  
+  $vocabs = taxonomy_get_vocabularies();
+  $url = 'admin/structure/taxonomy/';
+  $header = array(
+      array(
+        'data' => t('Vocabulary'),
+        'nowrap' => 'nowrap',
+      ),
+      array(
+        'data' => t('Statistics'),
+        'nowrap' => 'nowrap',
+      ),
+      /*
+      array(
+        'data' => t($opposite_title),
+        'nowrap' => 'nowrap',
+      ),
+      */
+  );
+  if( user_is_logged_in() ){
+    $header[] = array(
+      'data' => t('Operations'),
+      'nowrap' => 'nowrap',
+      'style' => 'font-style: italic',
+    );
+  }
+  $rows = array();
+  $delim = ' | ';
+  foreach($vocabs as $idx => $vocab){
+    if( $vocab->field_vocab_type[LANGUAGE_NONE][0]['value'] == $vocab_type ){
+      //NEED TO ABSTRACT - when new vocabularies are added
+      $entity_type = 'instrument';
+      $entity_type_vocabulary = 'vocabulary/'.$vocab->machine_name; //'seadatanet-devices';
+      $entity_type_count = count(taxonomy_get_tree($vocab->vid));
+      $mapped_count = taxonomy_xml_lookup_count_terms($vocab, TRUE); //rand(0, $entity_type_count);
+      $info = '';
+      $update = '';
+      
+      if( $vocab_type == TXL_MASTER_VOCAB_VALUE ){
+        $stats = $entity_type_count.' terms';
+        $locals = taxonomy_xml_lookup_get_vocabularies(TXL_LOCAL_VOCAB_VALUE, $vocab->vid);
+        if( !empty($locals) ){
+          $info = '<ol>';
+          $locals = taxonomy_vocabulary_load_multiple($locals);
+          foreach($locals as $local){
+            $info .= '<li>'.$local->name.' ('.l('view', '').')</li>';
+          }
+          $info .= '</ol>';
+        }
+        if( user_access('edit terms in '.$vocab->vid) ){
+          $update = l( 'update vocabulary', '');
+        }
+      } else if( $vocab_type == TXL_LOCAL_VOCAB_VALUE ){
+        $stats = $mapped_count.' out of '.$entity_type_count.' '.$action;
+        $masters = taxonomy_xml_lookup_get_master_vocabularies($vocab);
+        if( !empty($masters) ){
+          $info = '<ol>';
+          $masters = taxonomy_vocabulary_load_multiple($masters);
+          foreach($masters as $master){
+            $info .= '<li>'.$master->name.' ('.l('view', '').')</li>';
+          }
+          $info .= '</ol>';
+        }
+        if( user_access('edit terms in '.$vocab->vid) ){
+          $update = l( 'edit vocabulary', 'admin/structure/taxonomy/'.$vocab->machine_name.'/edit') . ' | '. l( 'edit terms', 'admin/structure/taxonomy/'.$vocab->machine_name);
+        }
+      }
+  	  
+  	  $rows[$idx] = array(
+  	    'data' => array(
+          array('data' => l( $vocab->name, $entity_type_vocabulary),'nowrap' => 'nowrap', 'valign' => 'top'),  
+          array('data' => $stats ,'nowrap' => 'nowrap', 'valign' => 'top'),
+          //array('data' => $info,'nowrap' => 'nowrap', 'valign' => 'top'),
+        )
+      );
+      if( user_is_logged_in() ){
+          $rows[$idx]['data'][] = array('data' => $update,'nowrap' => 'nowrap', 'valign' => 'top');
+      }
+    }
+  }
+  
+  return theme('table', array(
+    'header' => $header,
+    'rows' => $rows,
+    'sticky' => TRUE,
+    'empty' => t('No results'),
+    )
+  );
+}
+
+
+/*
+ * Return an array of uids who have permissions to update master vocabularies
+ */
+function taxonomy_xml_lookup_get_master_vocabulary_updaters(){
+  $query = db_select('users_roles', 'ur');
+  $query->join('role_permission', 'r', 'r.rid = ur.rid'); //JOIN with users
+  $query->fields('ur', array('uid'))
+    ->condition('permission', TXL_UPDATE_MASTER_VOCAB_PERMISSION)
+    ->propertyCondition('status', 1);
+  return $query->execute();
+}
+
+function taxonomy_xml_lookup_get_local_managers_for_master_vocabulary($master){
+  if( is_object($master) ){
+    $master = $master->vid;
+  }
+  $query = db_select('field_data_'.TXL_VOCABULARY_MGR_FIELD, 'mgr');
+  $query->join('users', 'u', 'mgr.'.TXL_VOCABULARY_MGR_FIELD.'_target_id = u.uid'); //JOIN with users
+  $query->join('taxonomy_vocabulary', 'v', 'mgr.entity_id = v.vid'); //JOIN with vocabularies
+  $query->join('field_data_'.TXL_VOCABULARY_TYPE_FIELD, 'vt', 'vt.entity_id = v.vid'); //JOIN with LOCAL vocabs
+  $query->join('field_data_'.TXL_VOCABULARY_MASTER_FIELD, 'master', 'master.entity_id = v.vid'); //JOIN with MASTER vocab
+  $query->condition('mgr.deleted',0)
+    ->condition('mgr.entity_type','taxonomy_vocabulary')
+    ->condition('vt.deleted',0)
+    ->condition('vt.entity_type','taxonomy_vocabulary')
+    ->condition('vt.'.TXL_VOCABULARY_TYPE_FIELD.'_value',TXL_LOCAL_VOCAB_VALUE)
+    ->condition('master.deleted',0)
+    ->condition('master.entity_type','taxonomy_vocabulary')
+    ->condition('master.'.TXL_VOCABULARY_MASTER_FIELD.'_target_id',$master)
+    ->condition('u.status', 1)
+    ->fields('u', array('uid'))
+    ->fields('v', array('vid'));
+  $result = $query->execute()->fetchAllAssoc('uid');
+  if( !empty($result) ){
+    return $result;
+  }
+  
+  return FALSE;
+}
+
+
+/**
+ * given a GUID, return the associated taxonomy_term
+ */
+function taxonomy_xml_lookup_guid_load($guid){
+
+  if( _taxonomy_xml_lookup_is_hex($guid) ){
+    $guid = _taxonomy_xml_lookup_hex_decode($guid);
+  }
+  $entity_type =  'taxonomy_term';
+  $query = new EntityFieldQuery;
+  $result = $query->entityCondition('entity_type',$entity_type)
+    ->fieldCondition('field_guid', 'value', $guid, '=')
+    ->execute();
+  if( !empty($result) ){
+    return taxonomy_term_load(key($result[$entity_type]));
+  }
+  
+  return FALSE;
+}
+/**
+ * set the page title for a taxonomay_term to the term's name
+ */
+function taxonomy_xml_lookup_term_title($term){
+  return $term->name;
+}
+
+/*
+ * View the taxonomy_term page for the GUID found in the GET parameter 'guid'
+ */
+function taxonomy_xml_lookup_guid_uri(){
+  $url = $_GET['guid'];
+  $term = taxonomy_xml_get_term_by_guid($url);
+  if( empty($term) ) {
+    drupal_set_title($url);
+    $html = '<p>Could not find any information about this resource, but you may visit it here: <a href="'.$url.'" target="_blank">'.$url.'</a></p>';
+    $html .= '<p><input type="button" onclick="history.go(-1);" value="Go Back"/></p>';
+    return $html;
+  } else {
+    drupal_goto('taxonomy/term/'.$term->tid);
+  }
+}
+
+/**
+ * return the GUID for a given term
+ */
+function taxonomy_xml_lookup_guid($term){
+  if( !is_object($term) ){
+    $term = taxonomy_term_load($term);
+  }
+  
+  if( !property_exists($term, 'field_guid') ){
+    return FALSE;
+  }
+  
+  return $term->field_guid[LANGUAGE_NONE][0]['value'];
+}
+
+function taxonomy_xml_lookup_term($term){
+  $uri = taxonomy_xml_lookup_guid($term);
+  return views_embed_view(SEAVOX_INSTRUMENT_LOOKUP_VIEW,SEAVOX_INSTRUMENT_LOOKUP_VIEW_PAGE_DISPLAY,$uri);
+}
+
+/**
+ * check if any Views arguments are URLs
+ */
+function taxonomy_xml_lookup_sparql_view($view_name, $display = '', $view_arguments = array()){
+  $args = array(
+    $view_name,
+    $display,
+  );
+  foreach($view_arguments as $arg){
+    $args[] = $arg;
+  }
+  return call_user_func_array('views_embed_view',$args);
+}
+
+/**
+ * check if any SPARQL Views arguments are URLs
+ */
+function taxonomy_xml_lookup_sparql_views_uri_argument(&$sparql_view){
+  $args = $sparql_view->view->args;
+  taxonomy_xml_lookup_views_pre_view(NULL, NULL, $args);
+  $sparql_view->view->args = $args;
+  return $args[0];
+}
+
+/**
+ * check if any Views arguments are URLs
+ */
+function taxonomy_xml_lookup_views_pre_view(&$view, &$display_id, &$args) {
+
+  $url = _taxonomy_xml_lookup_build_url_from_views_args($args);  
+  if( $url ){
+    foreach($args as $key => $arg){
+      if ($key != 0 ){
+        unset($args[$key]);
+      }
+    }
+    $args[0] = $url;
+  }
+}
+
+/**
+ * Setup the taxonomy_vocabulary form
+ */
+function taxonomy_xml_lookup_form_taxonomy_form_vocabulary_alter(&$form, &$form_state,$form_id){
+  
+  $isnew = !property_exists($form['#vocabulary'], 'vid');
+  taxonomy_xml_lookup_check_vocabulary_fields();
+  
+  $vocabulary = $form['#vocabulary'];
+  field_attach_form('taxonomy_vocabulary', $vocabulary, $form, $form_state);
+
+  $form[TXL_VOCABULARY_MGR_FIELD][LANGUAGE_NONE]['#options'] = _taxonomy_xml_lookup_get_vocab_manager_options($form[TXL_VOCABULARY_MGR_FIELD][LANGUAGE_NONE]['#options'], $vocabulary);  
+  $form[TXL_VOCABULARY_MASTER_FIELD][LANGUAGE_NONE]['#options'] =  _taxonomy_xml_lookup_get_vocab_master_options($form[TXL_VOCABULARY_MASTER_FIELD][LANGUAGE_NONE]['#options'], $vocabulary);
+  
+  $form[TXL_VOCABULARY_MASTER_FIELD]['#states'] = array(
+    'visible' => array(
+      ':input[name="field_vocab_type[und]"]' => array('value' => TXL_LOCAL_VOCAB_VALUE),
+    ),
+  );
+
+  $form['field_source_uri']['#states'] = array(
+    'visible' => array(
+      ':input[name="field_vocab_type[und]"]' => array('value' => TXL_MASTER_VOCAB_VALUE),
+    ),
+  );
+  
+  $form['#submit'][] = 'taxonomy_xml_lookup_vocabulary_submit';
+}
+
+/**
+ * Check if the vocabulary type is not LOCAL, then remove the Master Vocbulary value
+ */
+function taxonomy_xml_lookup_vocabulary_submit($form, &$form_state){
+
+  $vocabulary = $form_state['vocabulary'];
+  if( $form_state['input'][TXL_VOCABULARY_TYPE_FIELD][LANGUAGE_NONE][0] != TXL_LOCAL_VOCAB_VALUE ){
+    unset($vocabulary->{TXL_VOCABULARY_MASTER_FIELD}[LANGUAGE_NONE]);
+    taxonomy_vocabulary_save($vocabulary);
+  }
+}
+
+/*
+ * Check if the vocabulary type, master vocabulary, & vocabulary manager fields exist and are attached to taxonomy_vocabulary
+ */
+function taxonomy_xml_lookup_check_vocabulary_fields(){
+
+  if (! field_info_field(TXL_VOCABULARY_TYPE_FIELD)) {
+    // Create the generic, uninstanced field definition
+    taxonomy_xml_lookup_create_vocab_type_field();
+  }
+  if (!field_info_instance('taxonomy_vocabulary', TXL_VOCABULARY_TYPE_FIELD, 'taxonomy_vocabulary')) {
+    watchdog('taxonomy_xml_lookup', "Adding %field_type storage support to vocabulary.", array('%field_type' => TXL_VOCABULARY_TYPE_FIELD), WATCHDOG_INFO );
+    taxonomy_xml_lookup_create_vocabulary_field();
+  }
+  
+  if (! field_info_field(TXL_VOCABULARY_MASTER_FIELD)) {
+    // Create the generic, uninstanced field definition
+    taxonomy_xml_lookup_create_vocab_master_field();
+  }
+  if (!field_info_instance('taxonomy_vocabulary', TXL_VOCABULARY_MASTER_FIELD, 'taxonomy_vocabulary')) {
+    watchdog('taxonomy_xml_lookup', "Adding %field_type storage support to vocabulary.", array('%field_type' => TXL_VOCABULARY_MASTER_FIELD), WATCHDOG_INFO );
+    taxonomy_xml_lookup_create_master_vocabulary_field();
+  }
+  
+  
+  if (! field_info_field(TXL_VOCABULARY_MGR_FIELD)) {
+    // Create the generic, uninstanced field definition
+    taxonomy_xml_lookup_create_vocab_manager_field();
+  }
+  if (!field_info_instance('taxonomy_vocabulary', TXL_VOCABULARY_MGR_FIELD, 'taxonomy_vocabulary')) {
+    watchdog('taxonomy_xml_lookup', "Adding %field_type storage support to vocabulary.", array('%field_type' => TXL_VOCABULARY_MGR_FIELD), WATCHDOG_INFO );
+    taxonomy_xml_lookup_create_manager_vocabulary_field();
+  }
+
+}
+
+/**
+ * Create a field instance to attach to a vocab and store the type in
+ * 
+ * Uses field API CRUD
+ */
+function taxonomy_xml_lookup_create_vocabulary_field() {
+  $instance = array(
+    'field_name' => TXL_VOCABULARY_TYPE_FIELD,
+    'entity_type' => 'taxonomy_vocabulary',
+    'bundle' => 'taxonomy_vocabulary',
+    'label' => t('Vocabulary Type'),
+    'description' => t('Select an option from the list. Project vocabulary terms map to Master vocabulary terms.'),
+    'default_value' => 3,	// add a default value here that matches your key => index values
+    'display' => array(
+      'default' => array(
+        'label' => 'above',
+        'module' => 'list',
+        'settings' => array(),
+        'type' => 'list_default',
+        'weight' => -1,
+      ),
+      'teaser' => array(
+        'label' => 'above',
+        'settings' => array(),
+        'type' => 'hidden',
+        'weight' => -1,
+      ),
+    ),
+    'required' => 1,
+    'settings' => array(
+      'user_register_form' => FALSE,
+    ),
+    'widget' => array(
+      'active' => 1,
+      'module' => 'options',
+      'settings' => array(),
+      'type' => 'options_select',
+    ),
+  );
+  return field_create_instance($instance);
+}
+
+/**
+ * Create a field instance to attach to a local vocab and store the master vocab in
+ * 
+ * Uses field API CRUD
+ */
+function taxonomy_xml_lookup_create_master_vocabulary_field() {
+  $instance = array(
+    'field_name' => TXL_VOCABULARY_MASTER_FIELD,
+    'entity_type' => 'taxonomy_vocabulary',
+    'bundle' => 'taxonomy_vocabulary',
+    'label' => t('Master Vocabulary'),
+    'description' => t('Select the Master Vocabulary to map to.'),
+    'required' => FALSE,
+    'settings' => array(
+      'target_type' => 'taxonomy_vocabulary',
+      'handler_settings' => array('target_bundles' => array('taxonomy_vocabulary')),
+    ),
+    'widget' => array(
+      'module' => 'options',
+      'type' => 'options_buttons',
+    ),
+  );
+  return field_create_instance($instance);
+}
+
+/**
+ * Create a field instance to attach to a local vocab and store the master vocab in
+ * 
+ * Uses field API CRUD
+ */
+function taxonomy_xml_lookup_create_manager_vocabulary_field() {
+  $instance = array(
+    'field_name' => TXL_VOCABULARY_MGR_FIELD,
+    'entity_type' => 'taxonomy_vocabulary',
+    'bundle' => 'taxonomy_vocabulary',
+    'label' => t('Vocabulary Manager'),
+    'description' => t('Select the User(s) who manage this Vocabulary.'),
+    'required' => FALSE,
+    'settings' => array(
+      'target_type' => 'user',
+      'handler_settings' => array('target_bundles' => array('user')),
+    ),
+    'widget' => array(
+      'module' => 'options',
+      'type' => 'options_buttons',
+    ),
+  );
+  return field_create_instance($instance);
+}
+
+
+/**
+ * Create a field that will be applied to our vocabularies so we can
+ * identify their type.
+ * 
+ * Uses field API CRUD
+ */
+function taxonomy_xml_lookup_create_vocab_type_field() {
+  $field = array(
+    'field_name' => TXL_VOCABULARY_TYPE_FIELD,
+    'label' => t('Select which type of vocabulary this will be'),
+    'type' => 'list_integer',
+    'cardinality' => '1', // change this to -1 to enable ctrl+select
+    'foreign keys' => array(),
+    'indexes' => array(
+      'value' => array(
+        0 => 'value',
+      ),
+    ),
+    'module' => 'list',
+    'settings' => array(
+      'allowed_values_function' => '_taxonomy_xml_lookup_vocab_options_list',
+    ),
+  );
+  
+  return field_create_field($field);
+}
+
+/**
+ * Create a field that will be applied to local vocabularies so we can
+ * specify their master.
+ * 
+ * Uses field API CRUD
+ */
+function taxonomy_xml_lookup_create_vocab_master_field() {
+  $field = array(
+    'field_name' => TXL_VOCABULARY_MASTER_FIELD,
+    'type' => 'entityreference',
+    'cardinality' => FIELD_CARDINALITY_UNLIMITED,
+    'settings' => array(
+      'target_type' => 'taxonomy_vocabulary',
+      'handler_settings' => array('target_bundles' => array('taxonomy_vocabulary')), 
+    ),
+  );
+  return field_create_field($field);
+}
+
+/**
+ * Create a field that will be applied to local vocabularies so we can
+ * specify their master.
+ * 
+ * Uses field API CRUD
+ */
+function taxonomy_xml_lookup_create_vocab_manager_field() {
+  $field = array(
+    'field_name' => TXL_VOCABULARY_MGR_FIELD,
+    'type' => 'entityreference',
+    'cardinality' => FIELD_CARDINALITY_UNLIMITED,
+    'settings' => array(
+      'target_type' => 'user',
+      'handler_settings' => array('target_bundles' => array('user')), 
+    ),
+  );
+  return field_create_field($field);
+}
+
+/**
+ * Get local vocabularies
+ */
+function taxonomy_xml_lookup_get_vocabularies($type, $master = NULL){
+  $query = new EntityFieldQuery;
+  $query->entityCondition('entity_type','taxonomy_vocabulary');
+  if( !empty($master) ){
+    $query->fieldCondition(TXL_VOCABULARY_MASTER_FIELD,'target_id', $master, '=');
+  }
+  $result = $query->fieldCondition(TXL_VOCABULARY_TYPE_FIELD, 'value', $type, '=')
+    ->execute();
+  return isset($result['taxonomy_vocabulary']) ? array_keys($result['taxonomy_vocabulary']) : FALSE;
+}
+
+/**
+ * Get master vocabularies
+ */
+function taxonomy_xml_lookup_get_master_vocabularies($local){
+  $query = db_select('field_data_field_master_vocabulary','master');
+  $query->fields('master',array('field_master_vocabulary_target_id'))
+    ->condition('entity_type','taxonomy_vocabulary')
+    ->condition('entity_id',$local->vid)
+    ->condition('deleted',0);
+  $result = $query->execute()->fetchAllAssoc('field_master_vocabulary_target_id');
+  return isset($result) ? array_keys($result) : FALSE;
+}
+
+/**
+ * Options callback for vocabulary manager field
+ * @return - returns an indexed array as integer => string
+ */
+function _taxonomy_xml_lookup_get_vocab_manager_options($options, $vocab = NULL){
+  $mgrs = views_get_view_result('vocabulary_managers');
+  $opts = array();
+  foreach($mgrs as $mgr){
+    $opts[$mgr->uid] = $mgr->users_name;
+  }
+  return $opts;
+}
+
+/**
+ * Options callback for master vocabulary field
+ * @return - returns an indexed array as integer => string
+ */
+function _taxonomy_xml_lookup_get_vocab_master_options($options, $vocab = NULL){
+  $masters = taxonomy_vocabulary_load_multiple(taxonomy_xml_lookup_get_vocabs(TXL_MASTER_VOCAB_VALUE));
+  $opts = array();
+  foreach($masters as $vid => $master){
+    $opts[$vid] = $master->name;
+  }
+  return $opts;
+}
+
+
+/**
+ * Options callback for vocabulary type field
+ * @return - returns an indexed array as integer => string
+ */
+function _taxonomy_xml_lookup_vocab_options_list()  {
+  $options = array(
+    1 => 'Project',
+    2 => 'Community',
+    3 => 'N/A',
+  );
+  return $options;
+}
+
+
+/*
+ * Ask if argument is valid hexadecimal
+ */
+function _taxonomy_xml_lookup_is_hex($hex){
+  return ctype_xdigit($hex);
+}
+
+/*
+ * Using this method instead of hex2bin() because we are using older PHP version
+ */
+function _taxonomy_xml_lookup_hex_decode($hex){
+  $str='';
+  for ($i=0; $i < strlen($hex)-1; $i+=2){
+    $str .= chr(hexdec($hex[$i].$hex[$i+1]));
+  }
+  return $str;
+}
+
+/*
+ * Given an array of values, concatenate the values with '/' and check if it's a URL
+ */
+function _taxonomy_xml_lookup_build_url_from_views_args($pieces){
+  $url = '';  
+   // move the internal pointer to the end of the array
+  end($pieces);        
+  $last_key = key($pieces);
+  
+  foreach($pieces as $key => $piece){    
+    $url .= $piece;
+    if($key != $last_key){  
+      $url .= '/';  
+    }
+  }
+  
+  $parsed_url = parse_url($url);
+  if( isset($parsed_url['host']) ){
+    return $url;
+  }
+  
+  return FALSE;
+}
+
+function _taxonomy_xml_lookup_itemize_parents($parents, &$items = array()){
+  foreach($parents as $tid => $data){
+    $name = l($data['parent']->name, 'taxonomy/term/'.$tid);
+    if( empty($data['parents']) ){
+      $items[] = $name;
+    } else {
+      $items[] = array($name, 'children' => _taxonomy_xml_lookup_itemize_parents($data['parents']));
+    }
+  }
+  return $items;
+}
+
+function _taxonomy_xml_lookup_map_whoi_instruments(){
+  $vid = 17;
+  $terms = taxonomy_get_tree($vid,0,NULL,TRUE);
+  $delim = '/';
+  foreach($terms as $term){
+    if( isset($term->field_mapping[LANGUAGE_NONE][0]) ){
+      //continue;
+    } 
+    $id = $term->field_deviceid['und'][0]['value'];
+    $cat = array_key_exists(LANGUAGE_NONE, $term->field_devicecatid ) ? $term->field_devicecatid[LANGUAGE_NONE][0]['value'] : NULL;
+    $id = explode($delim,$id);
+    $cat = !empty($cat) ? explode($delim,$cat) : NULL;
+  
+    $master = 'L';
+    $nerc = 'http://vocab.nerc.ac.uk/collection/';
+    $tail = '1';
+
+    $uri = $nerc;
+    
+    $map = FALSE;
+
+    //starts with
+    if( !strncmp($id[0], $master, strlen($master)) ){
+      //ends with
+      if( substr($id[0], -strlen($tail))===$tail ){
+        $id[0] = substr($id[0],0,-1);
+      }
+      $uri .= $id[0] . '/current/' . $id[1] . $delim;
+      $map = TRUE;
+    } else if ( !empty($cat) && !strncmp($cat[0], $master, strlen($master)) ){
+      if( substr($cat[0], -strlen($tail))===$tail ){
+        $cat[0] = substr($cat[0],0,-1);
+      }
+      $uri .= $cat[0] . '/current/' . $cat[1] . $delim;
+      $map = TRUE;
+    } else {
+      $uri = NULL;
+    }
+    
+    
+    if( $map ){
+      $map_term = taxonomy_xml_get_term_by_guid($uri);
+      if( $map_term ){
+        $term->field_mapping[LANGUAGE_NONE][0]['tid'] = $map_term->tid;
+        taxonomy_term_save($term);
+        
+        $saved = taxonomy_term_load($term->tid);
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_entity_info_alter().
+ */
+function taxonomy_xml_lookup_entity_info_alter(&$info) {
+  $info['taxonomy_vocabulary']['fieldable'] = TRUE;
+  $info['taxonomy_vocabulary']['bundles']['taxonomy_vocabulary'] = array(
+   'label' => t('Vocabulary'),
+   'admin' => array(
+     'path' => 'admin/structure/taxonomy',
+     'access arguments' => array('administer taxonomy'),
+    ),
+  );
+  $info['taxonomy_vocabulary']['view modes'] = array(
+    'full' => array(
+    'label' => t('Full content'),
+      'custom settings' => FALSE,
+     ),
+  );
+}
+
+/**
+ * Implements callback_ENTITY_TYPE_presave().
+ */
+function taxonomy_xml_lookup_taxonomy_vocabulary_presave($vocabulary) {
+  field_attach_presave('taxonomy_vocabulary', $vocabulary);
+}
+
+/**
+ * Implements callback_ENTITY_TYPE_insert().
+ */
+function taxonomy_xml_lookup_taxonomy_vocabulary_insert($vocabulary) {
+  field_attach_insert('taxonomy_vocabulary', $vocabulary);
+}
+
+/**
+ * Implements callback_ENTITY_TYPE_update().
+ */
+function taxonomy_xml_lookup_taxonomy_vocabulary_update($vocabulary) {
+  field_attach_update('taxonomy_vocabulary', $vocabulary);
+}
+
+/**
+ * Implements callback_ENTITY_TYPE_delete().
+ */
+function taxonomy_xml_lookup_taxonomy_vocabulary_delete($vocabulary) {
+  field_attach_delete('taxonomy_vocabulary', $vocabulary);
+}
+
+/**
+ * Implements hook_field_extra_fields().
+ */
+function taxonomy_xml_lookup_field_extra_fields() {
+  $extra = array();
+  $extra['taxonomy_vocabulary']['taxonomy_vocabulary'] = array(
+    'form' => array(
+      'name' => array(
+        'label' => t('Name'),
+        'description' => t('Name of the vocabulary'),
+        'weight' => -5,
+      ),
+      'description' => array(
+        'label' => t('Description'),
+        'description' => t('Description of the vocabulary'),
+        'weight' => 0,
+      ),
+    ),
+    'display' => array(
+      'name' => array(
+        'label' => t('Name'),
+        'description' => t('Name of the vocabulary'),
+        'weight' => -5,
+      ),
+      'description' => array(
+        'label' => t('Description'),
+        'description' => t('Description of the vocabulary'),
+        'weight' => 0,
+      ),
+    ),
+  );
+  return $extra;
+}
+
+?>

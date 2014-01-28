@@ -1,0 +1,5 @@
+name = Taxonomy Term GUID Lookup
+description = Gather more information about a Taxonomy Term based on its GUID
+dependencies[] = taxonomy_xml
+package = "Taxonomy"
+core=7.x
